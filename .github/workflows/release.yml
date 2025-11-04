@@ -122,6 +122,39 @@ jobs:
           # Store binary path for later
           echo "BINARY_PATH=$BINARY_PATH" >> $GITHUB_ENV
 
+      - name: Import Code Signing Certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Create keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -timeout 3600 -lock-on-sleep build.keychain
+
+          # Import certificate
+          echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+          # Verify certificate
+          security find-identity -v -p codesigning
+
+      - name: Sign binary
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          BINARY_NAME="xcstrings-localizer"
+
+          # Sign the binary
+          codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" \
+            --timestamp "$BINARY_PATH/$BINARY_NAME"
+
+          # Verify signature
+          codesign -dvv "$BINARY_PATH/$BINARY_NAME"
+
       - name: Package binary
         run: |
           NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
@@ -136,11 +169,29 @@ jobs:
             zip -j "$BINARY_NAME-$NEW_VERSION-macos.zip" "$BINARY_NAME"
             echo "PACKAGE_PATH=$BINARY_PATH/$BINARY_NAME-$NEW_VERSION-macos.zip" >> $GITHUB_ENV
             echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
+            echo "ZIP_NAME=$BINARY_NAME-$NEW_VERSION-macos.zip" >> $GITHUB_ENV
           else
             echo "Binary not found at expected path"
             ls -la
             exit 1
           fi
+
+      - name: Notarize binary
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          echo "Submitting for notarization..."
+
+          # Submit for notarization
+          xcrun notarytool submit "$PACKAGE_PATH" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+
+          echo "Notarization complete!"
 
       - name: Create and push tag
         run: |
