@@ -35,7 +35,12 @@ jobs:
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
           # Check commit messages for version bump hints
-          COMMITS=$(git log $LATEST_TAG..HEAD --pretty=format:"%s")
+          # Handle case when no tags exist yet
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s")
+          else
+            COMMITS=$(git log $LATEST_TAG..HEAD --pretty=format:"%s")
+          fi
 
           if echo "$COMMITS" | grep -iq "BREAKING CHANGE\|major:"; then
             MAJOR=$((MAJOR + 1))
@@ -50,6 +55,7 @@ jobs:
 
           NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "version_without_v=$MAJOR.$MINOR.$PATCH" >> $GITHUB_OUTPUT
           echo "Next version: $NEW_VERSION"
 
       - name: Generate changelog
@@ -81,6 +87,23 @@ jobs:
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           cat CHANGELOG.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update version in code
+        run: |
+          NEW_VERSION="${{ steps.next_version.outputs.version_without_v }}"
+
+          # Update version in Main.swift
+          sed -i '' "s/version: \".*\"/version: \"$NEW_VERSION\"/" Sources/Main.swift
+
+          # Verify the change
+          grep "version:" Sources/Main.swift
+
+          # Commit the version update
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Sources/Main.swift
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git push
 
       - name: Setup Swift
         uses: swift-actions/setup-swift@v2

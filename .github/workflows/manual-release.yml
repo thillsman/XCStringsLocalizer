@@ -42,7 +42,10 @@ jobs:
             exit 1
           fi
 
+          # Store both versions (with and without 'v')
+          VERSION_WITHOUT_V=${VERSION#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_without_v=$VERSION_WITHOUT_V" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
 
       - name: Check if tag exists
@@ -81,6 +84,23 @@ jobs:
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           cat CHANGELOG.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update version in code
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.version_without_v }}"
+
+          # Update version in Main.swift
+          sed -i '' "s/version: \".*\"/version: \"$NEW_VERSION\"/" Sources/Main.swift
+
+          # Verify the change
+          grep "version:" Sources/Main.swift
+
+          # Commit the version update
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Sources/Main.swift
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git push
 
       - name: Setup Swift
         uses: swift-actions/setup-swift@v2
