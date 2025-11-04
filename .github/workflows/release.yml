@@ -1,0 +1,141 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for changelog generation
+
+      - name: Get latest tag
+        id: get_latest_tag
+        run: |
+          # Get the latest tag, or default to v0.0.0 if none exists
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Determine next version
+        id: next_version
+        run: |
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+
+          # Remove 'v' prefix and split version
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          # Check commit messages for version bump hints
+          COMMITS=$(git log $LATEST_TAG..HEAD --pretty=format:"%s")
+
+          if echo "$COMMITS" | grep -iq "BREAKING CHANGE\|major:"; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif echo "$COMMITS" | grep -iq "^feat\|minor:"; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Next version: $NEW_VERSION"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LATEST_TAG="${{ steps.get_latest_tag.outputs.latest_tag }}"
+          NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
+
+          echo "# Release $NEW_VERSION" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "**Release Date:** $(date +'%Y-%m-%d')" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          # Get commits since last tag
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            # First release, get all commits
+            git log --pretty=format:"- %s (%h)" >> CHANGELOG.md
+          else
+            echo "## Changes since $LATEST_TAG" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            git log $LATEST_TAG..HEAD --pretty=format:"- %s (%h)" >> CHANGELOG.md
+          fi
+
+          echo "" >> CHANGELOG.md
+
+          cat CHANGELOG.md
+
+          # Store changelog for release notes
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat CHANGELOG.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.9"
+
+      - name: Build release binary
+        run: |
+          swift build -c release
+
+          # Find the binary (adjust the path if your binary has a different name)
+          BINARY_PATH=$(swift build -c release --show-bin-path)
+          echo "Binary path: $BINARY_PATH"
+          ls -la $BINARY_PATH
+
+          # Store binary path for later
+          echo "BINARY_PATH=$BINARY_PATH" >> $GITHUB_ENV
+
+      - name: Package binary
+        run: |
+          NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
+
+          # Create a zip file with the binary
+          cd $BINARY_PATH
+
+          # Assuming your binary name matches the repo name
+          BINARY_NAME="XCStringsLocalizer"
+
+          if [ -f "$BINARY_NAME" ]; then
+            zip -j "$BINARY_NAME-$NEW_VERSION-macos.zip" "$BINARY_NAME"
+            echo "PACKAGE_PATH=$BINARY_PATH/$BINARY_NAME-$NEW_VERSION-macos.zip" >> $GITHUB_ENV
+            echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
+          else
+            echo "Binary not found at expected path"
+            ls -la
+            exit 1
+          fi
+
+      - name: Create and push tag
+        run: |
+          NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a $NEW_VERSION -m "Release $NEW_VERSION"
+          git push origin $NEW_VERSION
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.next_version.outputs.new_version }}
+          name: Release ${{ steps.next_version.outputs.new_version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: |
+            ${{ env.PACKAGE_PATH }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
