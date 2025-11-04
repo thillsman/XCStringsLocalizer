@@ -102,11 +102,6 @@ jobs:
           git commit -m "chore: bump version to $NEW_VERSION"
           git push
 
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "5.9"
-
       - name: Build release binary
         run: |
           swift build -c release
