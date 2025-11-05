@@ -21,6 +21,7 @@ struct XCStringsLocalizerCLI: AsyncParsableCommand {
         • Preserves placeholders (%@, %.0f, etc.)
         • Translation caching for efficiency
         • Dry run mode to preview changes
+        • AI-powered translation improvement suggestions
 
         EXAMPLES:
         # Translate entire file
@@ -34,6 +35,9 @@ struct XCStringsLocalizerCLI: AsyncParsableCommand {
 
         # Preview changes without saving
         xcstrings-localizer Localizable.xcstrings --dry-run
+
+        # Get AI suggestions for improving existing translations
+        xcstrings-localizer Localizable.xcstrings --suggest
 
         SETUP:
         Set your OpenAI API key via:
@@ -62,6 +66,12 @@ struct XCStringsLocalizerCLI: AsyncParsableCommand {
     )
     var keys: [String] = []
 
+    @Option(
+        name: [.short, .long],
+        help: "Specific languages to process (can be specified multiple times, e.g., fr, de, es)"
+    )
+    var language: [String] = []
+
     @Flag(
         name: [.short, .long],
         help: "Force re-translation of already translated strings"
@@ -73,6 +83,12 @@ struct XCStringsLocalizerCLI: AsyncParsableCommand {
         help: "Preview what would be translated without making changes"
     )
     var dryRun: Bool = false
+
+    @Flag(
+        name: [.short, .long],
+        help: "Analyze existing translations and suggest improvements (interactive)"
+    )
+    var suggest: Bool = false
 
     @Option(
         name: [.short, .long],
@@ -121,19 +137,30 @@ struct XCStringsLocalizerCLI: AsyncParsableCommand {
         let localizer = XCStringsLocalizer(apiKey: apiKey, model: model, appDescription: appDescription)
 
         do {
-            let stats = try await localizer.localize(
-                inputPath: inputFile,
-                outputPath: output,
-                keys: keys.isEmpty ? nil : keys,
-                force: force,
-                dryRun: dryRun
-            )
+            if suggest {
+                // Run suggestion mode
+                try await localizer.suggestImprovements(
+                    inputPath: inputFile,
+                    outputPath: output,
+                    keys: keys.isEmpty ? nil : keys,
+                    languages: language.isEmpty ? nil : language
+                )
+            } else {
+                // Run normal translation mode
+                let stats = try await localizer.localize(
+                    inputPath: inputFile,
+                    outputPath: output,
+                    keys: keys.isEmpty ? nil : keys,
+                    force: force,
+                    dryRun: dryRun
+                )
 
-            print("\n✓ Localization complete!", to: &stderrStream)
+                print("\n✓ Localization complete!", to: &stderrStream)
 
-            // Exit with non-zero if there were errors
-            if stats.errors > 0 {
-                throw ExitCode(1)
+                // Exit with non-zero if there were errors
+                if stats.errors > 0 {
+                    throw ExitCode(1)
+                }
             }
         } catch let error as DecodingError {
             print("Error: Invalid JSON in file", to: &stderrStream)

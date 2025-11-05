@@ -157,6 +157,181 @@ class XCStringsLocalizer {
         return stats
     }
 
+    /// Analyze existing translations and suggest improvements
+    func suggestImprovements(
+        inputPath: String,
+        outputPath: String? = nil,
+        keys: [String]? = nil,
+        languages: [String]? = nil
+    ) async throws {
+        // Load the file
+        print("Loading: \(inputPath)", to: &stderrStream)
+        let data = try Data(contentsOf: URL(fileURLWithPath: inputPath))
+        let decoder = JSONDecoder()
+        var xcstrings = try decoder.decode(XCStringsFile.self, from: data)
+
+        let sourceLanguage = xcstrings.sourceLanguage
+        let allLanguages = getAllLanguages(from: xcstrings)
+        var targetLanguages = allLanguages.subtracting([sourceLanguage])
+
+        // Filter languages if specified
+        if let languages = languages {
+            targetLanguages = targetLanguages.intersection(Set(languages))
+            if targetLanguages.isEmpty {
+                print("Error: None of the specified languages found in file", to: &stderrStream)
+                return
+            }
+        }
+
+        print("Source language: \(sourceLanguage)", to: &stderrStream)
+        if languages != nil {
+            print("Analyzing languages: \(targetLanguages.sorted().joined(separator: ", "))", to: &stderrStream)
+        } else {
+            print("Target languages: \(targetLanguages.sorted().joined(separator: ", "))", to: &stderrStream)
+        }
+
+        // Filter keys if specified
+        var stringsToProcess = xcstrings.strings
+        if let keys = keys {
+            stringsToProcess = stringsToProcess.filter { keys.contains($0.key) }
+            print("Analyzing specific keys: \(stringsToProcess.count)", to: &stderrStream)
+        } else {
+            print("Total keys in file: \(stringsToProcess.count)", to: &stderrStream)
+        }
+
+        print("\nAnalyzing translations...\n", to: &stderrStream)
+
+        var allSuggestions: [TranslationSuggestion] = []
+
+        // Process each target language
+        for language in targetLanguages.sorted() {
+            // Collect all translated strings for this language
+            var toAnalyze: [(key: String, original: String, translation: String, context: String?)] = []
+
+            for (key, entry) in stringsToProcess {
+                // Only analyze strings that have been translated
+                guard let localization = entry.localizations?[language],
+                      let stringUnit = localization.stringUnit,
+                      stringUnit.state == .translated,
+                      !stringUnit.value.isEmpty else {
+                    continue
+                }
+
+                let sourceText = getSourceText(key: key, localizations: entry.localizations)
+                toAnalyze.append((
+                    key: key,
+                    original: sourceText,
+                    translation: stringUnit.value,
+                    context: entry.comment
+                ))
+            }
+
+            if toAnalyze.isEmpty {
+                continue
+            }
+
+            print("Analyzing \(toAnalyze.count) translations in \(language)...", to: &stderrStream)
+
+            // Process in batches
+            let batches = toAnalyze.chunked(into: batchSize)
+
+            for (batchIndex, batch) in batches.enumerated() {
+                let batchNumber = batchIndex + 1
+                let totalBatches = batches.count
+                print("  Batch \(batchNumber)/\(totalBatches) (\(batch.count) strings)", to: &stderrStream)
+
+                do {
+                    let suggestions = try await client.analyzeBatch(
+                        translations: batch,
+                        targetLanguage: language
+                    )
+                    allSuggestions.append(contentsOf: suggestions)
+                    if !suggestions.isEmpty {
+                        print("    Found \(suggestions.count) high-confidence suggestion(s)", to: &stderrStream)
+                    }
+                } catch {
+                    print("    ✗ Batch error: \(error.localizedDescription)", to: &stderrStream)
+                }
+            }
+        }
+
+        // Present suggestions interactively
+        if allSuggestions.isEmpty {
+            print("\n✓ No improvement suggestions found!", to: &stderrStream)
+            print("All translations look good.", to: &stderrStream)
+            return
+        }
+
+        print("\n┌────────────────────────────────────────────────────────────┐", to: &stderrStream)
+        print("│ Found \(allSuggestions.count) suggestion(s) for improvement", to: &stderrStream)
+        print("└────────────────────────────────────────────────────────────┘\n", to: &stderrStream)
+
+        var acceptedCount = 0
+        var rejectedCount = 0
+
+        for (index, suggestion) in allSuggestions.enumerated() {
+            let languageName = client.languageName(for: suggestion.language)
+
+            print("[\(index + 1)/\(allSuggestions.count)] Key: \(suggestion.key)", to: &stderrStream)
+            print("Language: \(languageName) (Confidence: \(suggestion.confidence)/5)", to: &stderrStream)
+            print("", to: &stderrStream)
+            print("Current:   \(suggestion.currentTranslation)", to: &stderrStream)
+            print("Suggested: \(suggestion.suggestedTranslation)", to: &stderrStream)
+            print("", to: &stderrStream)
+            print("Reason: \(suggestion.reasoning)", to: &stderrStream)
+            print("", to: &stderrStream)
+
+            // Interactive prompt
+            print("Accept this suggestion? [y/N/q] ", to: &stderrStream)
+
+            if let response = readLine()?.lowercased() {
+                if response == "q" || response == "quit" {
+                    print("\nStopped by user.", to: &stderrStream)
+                    break
+                } else if response == "y" || response == "yes" {
+                    // Apply the suggestion
+                    if var entry = xcstrings.strings[suggestion.key] {
+                        if entry.localizations == nil {
+                            entry.localizations = [:]
+                        }
+                        entry.localizations?[suggestion.language] = Localization(
+                            stringUnit: StringUnit(state: .translated, value: suggestion.suggestedTranslation),
+                            variations: nil
+                        )
+                        xcstrings.strings[suggestion.key] = entry
+                        acceptedCount += 1
+                        print("✓ Applied\n", to: &stderrStream)
+                    }
+                } else {
+                    rejectedCount += 1
+                    print("✗ Skipped\n", to: &stderrStream)
+                }
+            } else {
+                rejectedCount += 1
+                print("✗ Skipped\n", to: &stderrStream)
+            }
+        }
+
+        // Save changes if any were accepted
+        if acceptedCount > 0 {
+            let outputPath = outputPath ?? inputPath
+            print("Saving changes to: \(outputPath)", to: &stderrStream)
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            let outputData = try encoder.encode(xcstrings)
+            try outputData.write(to: URL(fileURLWithPath: outputPath))
+
+            print("\n✓ Successfully applied \(acceptedCount) suggestion(s)!", to: &stderrStream)
+        } else {
+            print("\nNo changes made.", to: &stderrStream)
+        }
+
+        if rejectedCount > 0 {
+            print("Rejected \(rejectedCount) suggestion(s).", to: &stderrStream)
+        }
+    }
+
     // MARK: - Helper Methods
 
     private func getAllLanguages(from xcstrings: XCStringsFile) -> Set<String> {
