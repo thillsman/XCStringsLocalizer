@@ -111,3 +111,15 @@ struct TranslationStats {
         """
     }
 }
+
+// MARK: - Translation Suggestions
+
+/// A suggestion for improving an existing translation
+struct TranslationSuggestion: Codable {
+    let key: String
+    let language: String
+    let currentTranslation: String
+    let suggestedTranslation: String
+    let confidence: Int  // 1-5 scale
+    let reasoning: String
+}

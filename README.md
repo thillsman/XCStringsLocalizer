@@ -5,6 +5,7 @@ A native Swift command-line tool for automatically localizing Xcode `.xcstrings`
 ## Features
 
 - ✅ **Automatic Translation**: Translates strings to all target languages in your `.xcstrings` file
+- ✅ **AI-Powered Suggestions**: Interactive review of existing translations with improvement suggestions
 - ✅ **Batch Processing**: Groups strings for efficient API calls (15 strings at a time)
 - ✅ **App Context Support**: Optional app description for better translation quality
 - ✅ **Context-Aware**: Uses comments for better translation accuracy
@@ -114,6 +115,21 @@ xcstrings-localizer Localizable.xcstrings --keys "Welcome" --keys "Goodbye"
 # Force re-translation
 xcstrings-localizer Localizable.xcstrings --force
 
+# Get AI suggestions for improving existing translations (interactive)
+xcstrings-localizer Localizable.xcstrings --suggest
+
+# Analyze only French translations
+xcstrings-localizer Localizable.xcstrings --suggest --language fr
+
+# Analyze French and German translations
+xcstrings-localizer Localizable.xcstrings --suggest --language fr --language de
+
+# Analyze specific keys for improvement suggestions
+xcstrings-localizer Localizable.xcstrings --suggest --keys "Welcome"
+
+# Analyze specific keys in French only
+xcstrings-localizer Localizable.xcstrings --suggest --keys "Welcome" --language fr
+
 # Specify output file
 xcstrings-localizer input.xcstrings --output output.xcstrings
 
@@ -184,7 +200,70 @@ xcstrings-localizer Localizable.xcstrings \
   --model gpt-4o
 ```
 
-### Example 3: Xcode Build Phase Integration
+### Example 3: Review and Improve Existing Translations
+
+```bash
+xcstrings-localizer Localizable.xcstrings --suggest
+```
+
+**Interactive Output:**
+```
+Loading: Localizable.xcstrings
+Source language: en
+Target languages: de, es, fr, ja
+
+Analyzing translations...
+
+Analyzing 247 translations in de...
+  Batch 1/17 (15 strings)
+  Batch 2/17 (15 strings)
+  ...
+    Found 3 high-confidence suggestion(s)
+
+┌────────────────────────────────────────────────────────────┐
+│ Found 8 suggestion(s) for improvement
+└────────────────────────────────────────────────────────────┘
+
+[1/8] Key: welcome_message
+Language: French (Confidence: 5/5)
+
+Current:   Bienvenue à notre application
+Suggested: Bienvenue dans notre application
+
+Reason: More natural and idiomatic French expression. "dans" is more commonly used with applications than "à".
+
+Accept this suggestion? [y/N/q] y
+✓ Applied
+
+[2/8] Key: settings_title
+Language: German (Confidence: 4/5)
+
+Current:   Einstellungen Seite
+Suggested: Einstellungen
+
+Reason: More concise and natural. "Seite" (page) is redundant in this UI context.
+
+Accept this suggestion? [y/N/q] n
+✗ Skipped
+
+...
+
+Saving changes to: Localizable.xcstrings
+
+✓ Successfully applied 5 suggestion(s)!
+Rejected 3 suggestion(s).
+```
+
+**Features:**
+- 🤖 AI analyzes existing translations for quality
+- 🎯 Only suggests improvements with high confidence (4-5 out of 5)
+- 📊 Shows reasoning for each suggestion
+- ✋ Interactive approval - you decide what to apply
+- 🔍 Can filter by specific keys using `--keys`
+- 🌍 Can filter by specific languages using `--language`
+- 💾 Changes only saved when you accept suggestions
+
+### Example 4: Xcode Build Phase Integration
 
 Add a new "Run Script" phase in Xcode:
 
@@ -199,7 +278,7 @@ if /usr/local/bin/xcstrings-localizer "$XCSTRINGS" --dry-run 2>&1 | grep -q "Tra
 fi
 ```
 
-### Example 4: Pre-Commit Hook
+### Example 5: Pre-Commit Hook
 
 Create `.git/hooks/pre-commit`:
 
@@ -224,8 +303,10 @@ fi
 |--------|-------|-------------|---------|
 | `--output` | `-o` | Output file path | Input file |
 | `--keys` | `-k` | Translate specific keys (repeatable) | All keys |
+| `--language` | `-l` | Specific languages to process (repeatable, e.g., fr, de) | All languages |
 | `--force` | `-f` | Re-translate already translated strings | `false` |
 | `--dry-run` | `-d` | Preview changes without saving | `false` |
+| `--suggest` | `-s` | Analyze and suggest improvements (interactive) | `false` |
 | `--model` | `-m` | OpenAI model to use | `gpt-4o-mini` |
 | `--api-key` | | API key (overrides env var) | From env |
 | `--help` | `-h` | Show help | |
