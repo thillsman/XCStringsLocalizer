@@ -23,7 +23,20 @@ A native Swift command-line tool for automatically localizing Xcode `.xcstrings`
 
 ## Installation
 
-### Quick Install (Recommended)
+### Homebrew (Recommended)
+
+```bash
+brew install thillsman/xcstrings/xcstrings-localizer
+```
+
+Or tap first, then install:
+
+```bash
+brew tap thillsman/xcstrings
+brew install xcstrings-localizer
+```
+
+### Quick Install Script
 
 One command to download and install the latest version:
 
@@ -61,14 +74,17 @@ swift run xcstrings-localizer --help
 
 ### Updating
 
-Keep your tool up to date with:
+**If installed via Homebrew:**
+```bash
+brew upgrade xcstrings-localizer
+```
 
+**If installed via script or built from source:**
 ```bash
 xcstrings-localizer update
 ```
 
 Or re-run the installation script:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thillsman/XCStringsLocalizer/main/install.sh | bash
 ```
