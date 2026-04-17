@@ -26,6 +26,7 @@ class XCStringsLocalizer {
         inputPath: String,
         outputPath: String? = nil,
         keys: [String]? = nil,
+        languages: [String]? = nil,
         force: Bool = false,
         dryRun: Bool = false
     ) async throws -> TranslationStats {
@@ -39,7 +40,16 @@ class XCStringsLocalizer {
 
         let sourceLanguage = xcstrings.sourceLanguage
         let allLanguages = getAllLanguages(from: xcstrings)
-        let targetLanguages = allLanguages.subtracting([sourceLanguage])
+        var targetLanguages = allLanguages.subtracting([sourceLanguage])
+
+        // Filter languages if specified
+        if let languages = languages {
+            targetLanguages = targetLanguages.intersection(Set(languages))
+            if targetLanguages.isEmpty {
+                print("Error: None of the specified languages found in file", to: &stderrStream)
+                return stats
+            }
+        }
 
         print("Source language: \(sourceLanguage)", to: &stderrStream)
         print("Target languages: \(targetLanguages.sorted().joined(separator: ", "))", to: &stderrStream)

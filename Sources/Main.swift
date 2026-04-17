@@ -204,6 +204,7 @@ struct Localize: AsyncParsableCommand {
                         inputPath: inputFile,
                         outputPath: output,
                         keys: keys.isEmpty ? nil : keys,
+                        languages: language.isEmpty ? nil : language,
                         force: force,
                         dryRun: dryRun
                     )
